@@ -34,13 +34,22 @@ class Planet {
         this.x = x;
         this.y = y;
         this.size = size; // 1, 2, or 3
-        this.team = team;
-        this.hp = team === 'NONE' ? 0 : size * 100;
-        this.maxHP = size * 100;
         this.lastPulse = 0;
         this.pulsePhase = 0;
         this.orbitingPhotons = [];
         this.routeTarget = null; // Planet to send newly pulsed photons to
+
+        // Colored HP system - each team has separate HP
+        this.hpByTeam = {
+            RED: 0,
+            GREEN: 0,
+            BLUE: 0
+        };
+
+        // Initialize HP for starting team
+        if (team !== 'NONE') {
+            this.hpByTeam[team] = size * 100;
+        }
     }
 
     get radius() {
@@ -51,11 +60,45 @@ class Planet {
         return TEAMS[this.team];
     }
 
+    get team() {
+        // Team is determined by who has the most HP
+        let maxHP = 0;
+        let controllingTeam = 'NONE';
+
+        for (const [team, hp] of Object.entries(this.hpByTeam)) {
+            if (hp > maxHP) {
+                maxHP = hp;
+                controllingTeam = team;
+            }
+        }
+
+        // Must have at least 100 HP to control a planet
+        if (maxHP < 100) {
+            return 'NONE';
+        }
+
+        return controllingTeam;
+    }
+
+    get hp() {
+        // Return the controlling team's HP, or total HP if neutral
+        const team = this.team;
+        if (team === 'NONE') {
+            return Math.max(this.hpByTeam.RED, this.hpByTeam.GREEN, this.hpByTeam.BLUE);
+        }
+        return this.hpByTeam[team];
+    }
+
+    get maxHP() {
+        return this.size * 100;
+    }
+
     get currentSize() {
-        // Calculate current size based on HP
-        if (this.hp >= 300) return 3;
-        if (this.hp >= 200) return 2;
-        if (this.hp >= 100) return 1;
+        // Calculate current size based on controlling team's HP
+        const hp = this.hp;
+        if (hp >= 300) return 3;
+        if (hp >= 200) return 2;
+        if (hp >= 100) return 1;
         return 0;
     }
 
@@ -92,29 +135,20 @@ class Planet {
         return photons;
     }
 
-    addHP(amount) {
+    addHP(team, amount) {
         const oldSize = this.currentSize;
-        this.hp = Math.max(0, Math.min(this.maxHP, this.hp + amount));
 
-        // Check if size changed
+        // Add HP to the specific team's pool
+        this.hpByTeam[team] = Math.max(0, Math.min(300, this.hpByTeam[team] + amount));
+
+        // Check if size changed based on controlling team's HP
         const newSize = this.currentSize;
-        if (newSize !== oldSize) {
+        if (newSize !== oldSize && newSize > 0) {
             this.size = newSize;
-            this.maxHP = newSize * 100;
         }
 
-        // Planet becomes uninhabited at 0 HP
-        if (this.hp === 0) {
-            this.team = 'NONE';
-        }
-    }
-
-    colonize(team) {
-        if (this.team === 'NONE' && this.hp >= 100) {
-            this.team = team;
-            this.size = 1;
-            this.maxHP = 100;
-        }
+        // If a team's HP drops to 0 and they were controlling, planet may become neutral
+        // (handled automatically by the team getter)
     }
 
     draw(ctx) {
@@ -134,34 +168,46 @@ class Planet {
         ctx.stroke();
         ctx.globalAlpha = 1;
 
-        // HP bar for all planets
+        // Multi-colored HP bars showing each team's HP
         const barWidth = this.radius * 2;
         const barHeight = 5;
+        const barSpacing = 2;
         const barX = this.x - barWidth / 2;
-        const barY = this.y + this.radius + 10;
+        let barY = this.y + this.radius + 10;
 
-        // Background
-        ctx.fillStyle = '#333';
-        ctx.fillRect(barX, barY, barWidth, barHeight);
+        const teams = ['RED', 'GREEN', 'BLUE'];
+        for (const team of teams) {
+            const teamHP = this.hpByTeam[team];
+            if (teamHP > 0) {
+                // Background
+                ctx.fillStyle = '#333';
+                ctx.fillRect(barX, barY, barWidth, barHeight);
 
-        // HP fill
-        if (this.team !== 'NONE') {
-            const hpPercent = this.hp / this.maxHP;
-            ctx.fillStyle = this.color;
-            ctx.fillRect(barX, barY, barWidth * hpPercent, barHeight);
-        } else if (this.hp > 0) {
-            // Show progress to colonization for uninhabited planets
-            const hpPercent = this.hp / 100;
-            ctx.fillStyle = '#666';
-            ctx.fillRect(barX, barY, barWidth * hpPercent, barHeight);
+                // HP fill
+                const hpPercent = Math.min(teamHP / 300, 1); // Max 300 HP
+                ctx.fillStyle = TEAMS[team];
+                ctx.fillRect(barX, barY, barWidth * hpPercent, barHeight);
+
+                // HP text
+                ctx.fillStyle = '#fff';
+                ctx.font = '10px Courier New';
+                ctx.textAlign = 'left';
+                ctx.fillText(`${teamHP}`, barX + 2, barY + barHeight + 10);
+
+                barY += barHeight + barSpacing + 12;
+            }
         }
 
-        // HP text
-        ctx.fillStyle = '#fff';
-        ctx.font = '10px Courier New';
-        ctx.textAlign = 'center';
-        const displayMaxHP = this.team !== 'NONE' ? this.maxHP : 100;
-        ctx.fillText(`${this.hp}/${displayMaxHP}`, this.x, barY + barHeight + 12);
+        // Show total if neutral (no team has 100+)
+        if (this.team === 'NONE') {
+            const maxTeamHP = Math.max(this.hpByTeam.RED, this.hpByTeam.GREEN, this.hpByTeam.BLUE);
+            if (maxTeamHP < 100 && maxTeamHP > 0) {
+                ctx.fillStyle = '#888';
+                ctx.font = '10px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText(`Need 100 to control`, this.x, barY);
+            }
+        }
     }
 }
 
@@ -248,17 +294,16 @@ class Photon {
         for (const planet of planets) {
             const dist = distance(this.x, this.y, planet.x, planet.y);
             if (dist < planet.radius) {
-                if (planet.team === 'NONE') {
-                    // Colonize
-                    planet.addHP(1);
-                    planet.colonize(this.team);
-                } else if (planet.team === this.team) {
-                    // Heal/Upgrade
-                    planet.addHP(1);
-                } else {
-                    // Attack
-                    planet.addHP(-1);
+                const controllingTeam = planet.team;
+
+                // Always add HP to this photon's team
+                planet.addHP(this.team, 1);
+
+                // If attacking an enemy planet, also subtract from their HP
+                if (controllingTeam !== 'NONE' && controllingTeam !== this.team) {
+                    planet.addHP(controllingTeam, -1);
                 }
+
                 this.dead = true;
                 break;
             }
