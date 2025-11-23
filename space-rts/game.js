@@ -229,8 +229,8 @@ class Photon {
             this.y += this.vy * dt;
         }
 
-        // Check for orbit capture by friendly planets
-        if (this.state !== 'orbiting') {
+        // Check for orbit capture by friendly planets (but not if moving to a target)
+        if (this.state !== 'orbiting' && this.state !== 'moving') {
             for (const planet of planets) {
                 if (planet.team === this.team) {
                     const dist = distance(this.x, this.y, planet.x, planet.y);
@@ -361,15 +361,15 @@ class Game {
                     // Drag selection (only if not dragging from a planet)
                     this.selectPhotonsInCircle(this.dragStartX, this.dragStartY, dragDist);
                 } else if (dragDist <= 10) {
-                    // Click to move selected photons or clear route
-                    if (this.dragSourcePlanet) {
-                        // Clear route if clicking on a planet
-                        this.dragSourcePlanet.routeTarget = null;
-                    } else if (this.selectedPhotons.size > 0) {
-                        // Move selected photons
+                    // Click - check what to do
+                    if (this.selectedPhotons.size > 0) {
+                        // Move selected photons (priority over route clearing)
                         for (const photon of this.selectedPhotons) {
                             photon.setTarget(e.clientX, e.clientY);
                         }
+                    } else if (this.dragSourcePlanet) {
+                        // Clear route if clicking on a planet with no selected photons
+                        this.dragSourcePlanet.routeTarget = null;
                     }
                 }
             }
