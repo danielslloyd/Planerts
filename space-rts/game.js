@@ -40,6 +40,7 @@ class Planet {
         this.lastPulse = 0;
         this.pulsePhase = 0;
         this.orbitingPhotons = [];
+        this.routeTarget = null; // Planet to send newly pulsed photons to
     }
 
     get radius() {
@@ -73,12 +74,19 @@ class Planet {
 
         for (let i = 0; i < emitCount; i++) {
             const angle = (Math.PI * 2 * i) / emitCount + Math.random() * 0.3;
-            photons.push(new Photon(
+            const photon = new Photon(
                 this.x + Math.cos(angle) * this.radius,
                 this.y + Math.sin(angle) * this.radius,
                 this.team,
                 angle
-            ));
+            );
+
+            // If there's a route target, send the photon there
+            if (this.routeTarget) {
+                photon.setTarget(this.routeTarget.x, this.routeTarget.y);
+            }
+
+            photons.push(photon);
         }
 
         return photons;
@@ -126,28 +134,34 @@ class Planet {
         ctx.stroke();
         ctx.globalAlpha = 1;
 
-        // HP bar
+        // HP bar for all planets
+        const barWidth = this.radius * 2;
+        const barHeight = 5;
+        const barX = this.x - barWidth / 2;
+        const barY = this.y + this.radius + 10;
+
+        // Background
+        ctx.fillStyle = '#333';
+        ctx.fillRect(barX, barY, barWidth, barHeight);
+
+        // HP fill
         if (this.team !== 'NONE') {
-            const barWidth = this.radius * 2;
-            const barHeight = 5;
-            const barX = this.x - barWidth / 2;
-            const barY = this.y + this.radius + 10;
-
-            // Background
-            ctx.fillStyle = '#333';
-            ctx.fillRect(barX, barY, barWidth, barHeight);
-
-            // HP fill
             const hpPercent = this.hp / this.maxHP;
             ctx.fillStyle = this.color;
             ctx.fillRect(barX, barY, barWidth * hpPercent, barHeight);
-
-            // HP text
-            ctx.fillStyle = '#fff';
-            ctx.font = '10px Courier New';
-            ctx.textAlign = 'center';
-            ctx.fillText(`${this.hp}/${this.maxHP}`, this.x, barY + barHeight + 12);
+        } else if (this.hp > 0) {
+            // Show progress to colonization for uninhabited planets
+            const hpPercent = this.hp / 100;
+            ctx.fillStyle = '#666';
+            ctx.fillRect(barX, barY, barWidth * hpPercent, barHeight);
         }
+
+        // HP text
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px Courier New';
+        ctx.textAlign = 'center';
+        const displayMaxHP = this.team !== 'NONE' ? this.maxHP : 100;
+        ctx.fillText(`${this.hp}/${displayMaxHP}`, this.x, barY + barHeight + 12);
     }
 }
 
@@ -289,6 +303,7 @@ class Game {
         this.dragStartY = 0;
         this.dragCurrentX = 0;
         this.dragCurrentY = 0;
+        this.dragSourcePlanet = null; // Planet where drag started
 
         this.lastTime = performance.now();
         this.lastPulseCheck = 0;
@@ -303,6 +318,15 @@ class Game {
         this.canvas.height = window.innerHeight;
     }
 
+    getPlanetAtPosition(x, y) {
+        for (const planet of this.planets) {
+            if (distance(x, y, planet.x, planet.y) <= planet.radius) {
+                return planet;
+            }
+        }
+        return null;
+    }
+
     setupEventListeners() {
         window.addEventListener('resize', () => this.resizeCanvas());
 
@@ -312,6 +336,9 @@ class Game {
             this.dragStartY = e.clientY;
             this.dragCurrentX = e.clientX;
             this.dragCurrentY = e.clientY;
+
+            // Check if starting drag from a planet
+            this.dragSourcePlanet = this.getPlanetAtPosition(e.clientX, e.clientY);
         });
 
         this.canvas.addEventListener('mousemove', (e) => {
@@ -324,13 +351,22 @@ class Game {
         this.canvas.addEventListener('mouseup', (e) => {
             if (this.mouseDown) {
                 const dragDist = distance(this.dragStartX, this.dragStartY, e.clientX, e.clientY);
+                const targetPlanet = this.getPlanetAtPosition(e.clientX, e.clientY);
 
-                if (dragDist > 10) {
-                    // Drag selection
+                // Check for planet-to-planet routing
+                if (this.dragSourcePlanet && targetPlanet && this.dragSourcePlanet !== targetPlanet && dragDist > 10) {
+                    // Set up route from source planet to target planet
+                    this.dragSourcePlanet.routeTarget = targetPlanet;
+                } else if (dragDist > 10 && !this.dragSourcePlanet) {
+                    // Drag selection (only if not dragging from a planet)
                     this.selectPhotonsInCircle(this.dragStartX, this.dragStartY, dragDist);
-                } else {
-                    // Click to move selected photons
-                    if (this.selectedPhotons.size > 0) {
+                } else if (dragDist <= 10) {
+                    // Click to move selected photons or clear route
+                    if (this.dragSourcePlanet) {
+                        // Clear route if clicking on a planet
+                        this.dragSourcePlanet.routeTarget = null;
+                    } else if (this.selectedPhotons.size > 0) {
+                        // Move selected photons
                         for (const photon of this.selectedPhotons) {
                             photon.setTarget(e.clientX, e.clientY);
                         }
@@ -338,6 +374,7 @@ class Game {
                 }
             }
             this.mouseDown = false;
+            this.dragSourcePlanet = null;
         });
     }
 
@@ -488,6 +525,46 @@ class Game {
             this.ctx.fillRect(x, y, 1, 1);
         }
 
+        // Draw routes between planets
+        for (const planet of this.planets) {
+            if (planet.routeTarget) {
+                this.ctx.strokeStyle = planet.color;
+                this.ctx.globalAlpha = 0.4;
+                this.ctx.lineWidth = 2;
+                this.ctx.setLineDash([5, 5]);
+                this.ctx.beginPath();
+                this.ctx.moveTo(planet.x, planet.y);
+                this.ctx.lineTo(planet.routeTarget.x, planet.routeTarget.y);
+                this.ctx.stroke();
+                this.ctx.setLineDash([]);
+                this.ctx.globalAlpha = 1;
+
+                // Draw arrow at the end
+                const dx = planet.routeTarget.x - planet.x;
+                const dy = planet.routeTarget.y - planet.y;
+                const angle = Math.atan2(dy, dx);
+                const arrowSize = 10;
+                const endX = planet.routeTarget.x - Math.cos(angle) * planet.routeTarget.radius;
+                const endY = planet.routeTarget.y - Math.sin(angle) * planet.routeTarget.radius;
+
+                this.ctx.fillStyle = planet.color;
+                this.ctx.globalAlpha = 0.6;
+                this.ctx.beginPath();
+                this.ctx.moveTo(endX, endY);
+                this.ctx.lineTo(
+                    endX - Math.cos(angle - Math.PI / 6) * arrowSize,
+                    endY - Math.sin(angle - Math.PI / 6) * arrowSize
+                );
+                this.ctx.lineTo(
+                    endX - Math.cos(angle + Math.PI / 6) * arrowSize,
+                    endY - Math.sin(angle + Math.PI / 6) * arrowSize
+                );
+                this.ctx.closePath();
+                this.ctx.fill();
+                this.ctx.globalAlpha = 1;
+            }
+        }
+
         // Draw planets
         for (const planet of this.planets) {
             planet.draw(this.ctx);
@@ -498,16 +575,41 @@ class Game {
             photon.draw(this.ctx);
         }
 
-        // Draw selection circle
+        // Draw selection circle or planet-to-planet drag line
         if (this.mouseDown) {
-            const radius = distance(this.dragStartX, this.dragStartY, this.dragCurrentX, this.dragCurrentY);
-            this.ctx.strokeStyle = '#fff';
-            this.ctx.globalAlpha = 0.3;
-            this.ctx.lineWidth = 2;
-            this.ctx.beginPath();
-            this.ctx.arc(this.dragStartX, this.dragStartY, radius, 0, Math.PI * 2);
-            this.ctx.stroke();
-            this.ctx.globalAlpha = 1;
+            if (this.dragSourcePlanet) {
+                // Draw line from source planet to current mouse position
+                const targetPlanet = this.getPlanetAtPosition(this.dragCurrentX, this.dragCurrentY);
+                this.ctx.strokeStyle = this.dragSourcePlanet.color;
+                this.ctx.globalAlpha = 0.5;
+                this.ctx.lineWidth = 3;
+                this.ctx.setLineDash([5, 5]);
+                this.ctx.beginPath();
+                this.ctx.moveTo(this.dragSourcePlanet.x, this.dragSourcePlanet.y);
+                this.ctx.lineTo(this.dragCurrentX, this.dragCurrentY);
+                this.ctx.stroke();
+                this.ctx.setLineDash([]);
+                this.ctx.globalAlpha = 1;
+
+                // Highlight target planet if hovering over one
+                if (targetPlanet && targetPlanet !== this.dragSourcePlanet) {
+                    this.ctx.strokeStyle = '#fff';
+                    this.ctx.lineWidth = 3;
+                    this.ctx.beginPath();
+                    this.ctx.arc(targetPlanet.x, targetPlanet.y, targetPlanet.radius + 5, 0, Math.PI * 2);
+                    this.ctx.stroke();
+                }
+            } else {
+                // Draw selection circle
+                const radius = distance(this.dragStartX, this.dragStartY, this.dragCurrentX, this.dragCurrentY);
+                this.ctx.strokeStyle = '#fff';
+                this.ctx.globalAlpha = 0.3;
+                this.ctx.lineWidth = 2;
+                this.ctx.beginPath();
+                this.ctx.arc(this.dragStartX, this.dragStartY, radius, 0, Math.PI * 2);
+                this.ctx.stroke();
+                this.ctx.globalAlpha = 1;
+            }
         }
     }
 
