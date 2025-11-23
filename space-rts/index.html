@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Space RTS - Essence Edition</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            overflow: hidden;
+            font-family: 'Courier New', monospace;
+        }
+        #gameCanvas {
+            display: block;
+            background: #000;
+        }
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #fff;
+            font-size: 14px;
+            text-shadow: 2px 2px 4px #000;
+        }
+        .team-info {
+            margin: 5px 0;
+            padding: 5px;
+            background: rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="ui">
+        <div class="team-info" style="color: #ff4444;">Red Planets: <span id="redCount">0</span></div>
+        <div class="team-info" style="color: #44ff44;">Green Planets: <span id="greenCount">0</span></div>
+        <div class="team-info" style="color: #4444ff;">Blue Planets: <span id="blueCount">0</span></div>
+        <div class="team-info">FPS: <span id="fps">60</span></div>
+    </div>
+    <script src="game.js"></script>
+</body>
+</html>
