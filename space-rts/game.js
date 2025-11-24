@@ -294,14 +294,28 @@ class Photon {
         for (const planet of planets) {
             const dist = distance(this.x, this.y, planet.x, planet.y);
             if (dist < planet.radius) {
-                const controllingTeam = planet.team;
+                // Find which team currently has HP on this planet
+                let currentTeamWithHP = null;
+                for (const [team, hp] of Object.entries(planet.hpByTeam)) {
+                    if (hp > 0) {
+                        currentTeamWithHP = team;
+                        break;
+                    }
+                }
 
-                // Always add HP to this photon's team
-                planet.addHP(this.team, 1);
-
-                // If attacking an enemy planet, also subtract from their HP
-                if (controllingTeam !== 'NONE' && controllingTeam !== this.team) {
-                    planet.addHP(controllingTeam, -1);
+                if (currentTeamWithHP === null) {
+                    // No team has HP - add to this photon's team
+                    planet.addHP(this.team, 1);
+                } else if (currentTeamWithHP === this.team) {
+                    // Same team - add HP
+                    planet.addHP(this.team, 1);
+                } else {
+                    // Different team - reduce their HP
+                    planet.addHP(currentTeamWithHP, -1);
+                    // If we brought them to 0, start building our HP
+                    if (planet.hpByTeam[currentTeamWithHP] === 0) {
+                        planet.addHP(this.team, 1);
+                    }
                 }
 
                 this.dead = true;
