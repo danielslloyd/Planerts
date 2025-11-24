@@ -1,15 +1,31 @@
 // Game Configuration
 const CONFIG = {
+    // Planet settings
     PLANET_MIN_DISTANCE: 150,
     PLANET_COUNT: 12,
+    PLANET_BASE_RADIUS: 15,
     PULSE_INTERVAL: 2000, // milliseconds
+
+    // Photon settings
     PHOTON_SPEED: 100, // pixels per second
+    PHOTON_SIZE: 4,
+    SELECTION_HALO_SIZE: 8,
+
+    // Orbit settings
     ORBIT_RADIUS: 60,
     ORBIT_SPEED: 1, // radians per second
-    ATTRACTION_RANGE: 80, // roughly large planet diameter
-    PHOTON_SIZE: 4,
-    PLANET_BASE_RADIUS: 15,
-    SELECTION_HALO_SIZE: 8
+
+    // Physics - Enemy photon attraction
+    ENEMY_ATTRACTION_RANGE: 240, // tripled from 80
+    ENEMY_ATTRACTION_FORCE: 50,
+    ENEMY_COLLISION_DISTANCE: 8, // PHOTON_SIZE * 2
+
+    // Physics - Friendly photon repulsion
+    FRIENDLY_REPULSION_RANGE: 20,
+    FRIENDLY_REPULSION_FORCE: 5,
+
+    // Physics - Free floating deceleration
+    FREE_FLOAT_DECELERATION: 0.95
 };
 
 const TEAMS = {
@@ -132,7 +148,9 @@ class Planet {
 
             // If there's a route target, send the photon there
             if (this.routeTarget) {
-                photon.setTarget(this.routeTarget.x, this.routeTarget.y);
+                // Note: We'll need to pass planets from the game context
+                // This will be handled when photons are created in game.update()
+                photon.routeTargetPlanet = this.routeTarget;
             }
 
             photons.push(photon);
@@ -196,45 +214,45 @@ class Planet {
         ctx.stroke();
         ctx.globalAlpha = 1;
 
-        // Multi-colored HP bars showing each team's HP
+        // HP bars - show N bars for potential N (each bar = 100 HP)
         const barWidth = this.radius * 2;
         const barHeight = 5;
         const barSpacing = 2;
         const barX = this.x - barWidth / 2;
         let barY = this.y + this.radius + 10;
 
-        const teams = ['RED', 'GREEN', 'BLUE'];
-        for (const team of teams) {
-            const teamHP = this.hpByTeam[team];
-            if (teamHP > 0) {
-                // Background
-                ctx.fillStyle = '#333';
-                ctx.fillRect(barX, barY, barWidth, barHeight);
+        const currentHP = this.hp;
+        const controllingTeam = this.team;
 
-                // HP fill
-                const hpPercent = Math.min(teamHP / 300, 1); // Max 300 HP
-                ctx.fillStyle = TEAMS[team];
-                ctx.fillRect(barX, barY, barWidth * hpPercent, barHeight);
+        for (let barIndex = 0; barIndex < this.maxPotential; barIndex++) {
+            const barMinHP = barIndex * 100;
+            const barMaxHP = (barIndex + 1) * 100;
+            const barCurrentHP = Math.max(0, Math.min(100, currentHP - barMinHP));
 
-                // HP text
-                ctx.fillStyle = '#fff';
-                ctx.font = '10px Courier New';
-                ctx.textAlign = 'left';
-                ctx.fillText(`${teamHP}`, barX + 2, barY + barHeight + 10);
+            // Background
+            ctx.fillStyle = '#333';
+            ctx.fillRect(barX, barY, barWidth, barHeight);
 
-                barY += barHeight + barSpacing + 12;
+            // HP fill (only if there's HP in this bar)
+            if (barCurrentHP > 0) {
+                const fillPercent = barCurrentHP / 100;
+                ctx.fillStyle = TEAMS[controllingTeam];
+                ctx.fillRect(barX, barY, barWidth * fillPercent, barHeight);
             }
+
+            barY += barHeight + barSpacing;
         }
 
-        // Show total if neutral (no team has 100+)
-        if (this.team === 'NONE') {
-            const maxTeamHP = Math.max(this.hpByTeam.RED, this.hpByTeam.GREEN, this.hpByTeam.BLUE);
-            if (maxTeamHP < 100 && maxTeamHP > 0) {
-                ctx.fillStyle = '#888';
-                ctx.font = '10px Courier New';
-                ctx.textAlign = 'center';
-                ctx.fillText(`Need 100 to control`, this.x, barY);
-            }
+        // HP text below all bars
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${currentHP}/${this.maxHP}`, this.x, barY + 8);
+
+        // Show control message if neutral with some HP
+        if (this.team === 'NONE' && currentHP > 0) {
+            ctx.fillStyle = '#888';
+            ctx.fillText(`Need 100 to control`, this.x, barY + 20);
         }
     }
 }
@@ -254,17 +272,38 @@ class Photon {
         this.orbitPlanet = null;
         this.orbitAngle = 0;
         this.dead = false;
+
+        // Mission tracking
+        this.missionTarget = null; // Can be {x, y} for coordinates or a Planet reference
+        this.missionIsAbsorbable = false; // True if mission target is enemy, neutral, or non-maxed friendly planet
     }
 
     get color() {
         return TEAMS[this.team];
     }
 
-    setTarget(x, y) {
+    setTarget(x, y, planets = []) {
         this.state = 'moving';
         this.targetX = x;
         this.targetY = y;
         this.orbitPlanet = null;
+
+        // Set mission and determine if it's absorbable
+        this.missionTarget = { x, y };
+        this.missionIsAbsorbable = false;
+
+        // Check if mission is to a planet
+        for (const planet of planets) {
+            const dist = distance(x, y, planet.x, planet.y);
+            if (dist < planet.radius) {
+                this.missionTarget = planet;
+                // Mission is absorbable if: enemy, neutral, or friendly but not at max HP
+                this.missionIsAbsorbable =
+                    planet.team !== this.team || // Enemy or neutral
+                    planet.hpByTeam[this.team] < planet.maxHP; // Friendly but not maxed
+                break;
+            }
+        }
     }
 
     update(deltaTime, planets) {
@@ -297,8 +336,8 @@ class Photon {
             }
         } else {
             // Free floating - slow down
-            this.vx *= 0.95;
-            this.vy *= 0.95;
+            this.vx *= CONFIG.FREE_FLOAT_DECELERATION;
+            this.vy *= CONFIG.FREE_FLOAT_DECELERATION;
             this.x += this.vx * dt;
             this.y += this.vy * dt;
         }
@@ -472,7 +511,7 @@ class Game {
                     if (this.selectedPhotons.size > 0) {
                         // Move selected photons (priority over route clearing)
                         for (const photon of this.selectedPhotons) {
-                            photon.setTarget(e.clientX, e.clientY);
+                            photon.setTarget(e.clientX, e.clientY, this.planets);
                         }
                     } else if (this.dragSourcePlanet) {
                         // Clear route if clicking on a planet with no selected photons
@@ -489,14 +528,14 @@ class Game {
         const teams = ['RED', 'GREEN', 'BLUE'];
         const homePlanets = [];
 
-        // Generate home planets for each team
+        // Generate home planets for each team (all start at potential 3, HP 100)
         for (let i = 0; i < teams.length; i++) {
             const angle = (Math.PI * 2 * i) / teams.length;
             const dist = Math.min(this.canvas.width, this.canvas.height) * 0.3;
             const x = this.canvas.width / 2 + Math.cos(angle) * dist;
             const y = this.canvas.height / 2 + Math.sin(angle) * dist;
-            const size = Math.floor(randomRange(1, 4));
-            const maxPotential = Math.floor(randomRange(1, 4));
+            const size = 1; // Start at size 1 (will have 100 HP)
+            const maxPotential = 3; // All home planets have potential 3
 
             const planet = new Planet(x, y, size, teams[i], maxPotential);
             homePlanets.push(planet);
@@ -542,10 +581,6 @@ class Game {
     }
 
     checkPhotonCollisions() {
-        const ENEMY_ATTRACTION_RANGE = CONFIG.ATTRACTION_RANGE * 3; // Tripled
-        const FRIENDLY_REPULSION_RANGE = 20;
-        const FRIENDLY_REPULSION_FORCE = 5;
-
         for (let i = 0; i < this.photons.length; i++) {
             const p1 = this.photons[i];
             if (p1.dead) continue;
@@ -557,35 +592,37 @@ class Game {
                 const dist = distance(p1.x, p1.y, p2.x, p2.y);
 
                 if (p1.team !== p2.team) {
-                    // Enemy photons attract and collide (now works even when orbiting)
-                    if (dist < ENEMY_ATTRACTION_RANGE) {
-                        // Attract towards each other
+                    // Enemy photons attract and collide
+                    // Exception: Don't apply pull if photon is on mission to absorbable planet
+                    if (dist < CONFIG.ENEMY_ATTRACTION_RANGE) {
                         const dx = p2.x - p1.x;
                         const dy = p2.y - p1.y;
-                        const force = 50 / (dist + 1);
+                        const force = CONFIG.ENEMY_ATTRACTION_FORCE / (dist + 1);
 
-                        // Apply force if not orbiting (orbiting photons can't change velocity)
-                        if (p1.state !== 'orbiting') {
+                        // Apply force to p1 if: not orbiting AND (no mission OR mission not absorbable)
+                        if (p1.state !== 'orbiting' && !p1.missionIsAbsorbable) {
                             p1.vx += (dx / dist) * force;
                             p1.vy += (dy / dist) * force;
                         }
-                        if (p2.state !== 'orbiting') {
+
+                        // Apply force to p2 if: not orbiting AND (no mission OR mission not absorbable)
+                        if (p2.state !== 'orbiting' && !p2.missionIsAbsorbable) {
                             p2.vx -= (dx / dist) * force;
                             p2.vy -= (dy / dist) * force;
                         }
 
                         // Collision - neutralize
-                        if (dist < CONFIG.PHOTON_SIZE * 2) {
+                        if (dist < CONFIG.ENEMY_COLLISION_DISTANCE) {
                             p1.dead = true;
                             p2.dead = true;
                         }
                     }
                 } else {
                     // Friendly photons repel slightly to prevent dense clusters
-                    if (dist < FRIENDLY_REPULSION_RANGE && p1.state !== 'orbiting' && p2.state !== 'orbiting') {
+                    if (dist < CONFIG.FRIENDLY_REPULSION_RANGE && p1.state !== 'orbiting' && p2.state !== 'orbiting') {
                         const dx = p2.x - p1.x;
                         const dy = p2.y - p1.y;
-                        const force = FRIENDLY_REPULSION_FORCE / (dist + 1);
+                        const force = CONFIG.FRIENDLY_REPULSION_FORCE / (dist + 1);
 
                         p1.vx -= (dx / dist) * force;
                         p1.vy -= (dy / dist) * force;
@@ -609,6 +646,13 @@ class Game {
             this.lastPulseCheck = currentTime;
             for (const planet of this.planets) {
                 const newPhotons = planet.pulse(currentTime);
+                // Set targets for routed photons
+                for (const photon of newPhotons) {
+                    if (photon.routeTargetPlanet) {
+                        photon.setTarget(photon.routeTargetPlanet.x, photon.routeTargetPlanet.y, this.planets);
+                        delete photon.routeTargetPlanet;
+                    }
+                }
                 this.photons.push(...newPhotons);
             }
         }
