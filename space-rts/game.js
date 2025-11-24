@@ -71,7 +71,9 @@ class Planet {
 
     get radius() {
         // Radius determined by current HP and potential
-        return CONFIG.PLANET_BASE_RADIUS * this.size;
+        // Always show at least size 1 radius, even for neutral/0 HP planets
+        const size = Math.max(1, this.size);
+        return CONFIG.PLANET_BASE_RADIUS * size;
     }
 
     get size() {
@@ -152,7 +154,7 @@ class Planet {
 
             // If there's a route target, send the photon there
             if (this.routeTarget) {
-                // Note: We'll need to pass planets from the game context
+                // RouteTarget can be a Planet or coordinates {x, y}
                 // This will be handled when photons are created in game.update()
                 photon.routeTargetPlanet = this.routeTarget;
             }
@@ -380,7 +382,8 @@ class Photon {
                             this.orbitAngle = Math.atan2(this.y - planet.y, this.x - planet.x);
                         }
                     } else if (planet.routeTarget) {
-                        // Routed to another planet: adopt that route
+                        // Routed to another planet or coordinates: adopt that route
+                        // routeTarget can be a Planet or coordinates {x, y}
                         this.setTarget(planet.routeTarget.x, planet.routeTarget.y, planets);
                     }
                     // Don't die - continue with new mission
@@ -450,11 +453,12 @@ class Game {
 
         this.lastTime = performance.now();
         this.lastPulseCheck = 0;
+        this.gameTime = 0; // Game time in milliseconds (affected by speed)
 
         // Stats tracking
         this.stats = {
             history: [],
-            lastLogTime: performance.now()
+            lastLogTime: 0 // Use game time for stats
         };
         this.gameActive = true;
         this.gameSpeed = 1; // 1x, 2x, or 10x
@@ -516,16 +520,32 @@ class Game {
                 const dragDist = distance(this.dragStartX, this.dragStartY, e.clientX, e.clientY);
                 const targetPlanet = this.getPlanetAtPosition(e.clientX, e.clientY);
 
-                // Check for planet-to-planet routing (or self-routing)
+                // Check for planet routing (to planet or empty space)
                 if (this.dragSourcePlanet && dragDist > 10) {
                     if (targetPlanet) {
                         // Set up route to target planet (including self)
                         this.dragSourcePlanet.routeTarget = targetPlanet;
+                    } else {
+                        // Check if close to any planet (snapping)
+                        let closestPlanet = null;
+                        let closestDist = 50; // Snap radius
+                        for (const planet of this.planets) {
+                            const dist = distance(e.clientX, e.clientY, planet.x, planet.y);
+                            if (dist < closestDist) {
+                                closestDist = dist;
+                                closestPlanet = planet;
+                            }
+                        }
+                        // If close enough to a planet, snap to it; otherwise route to coordinates
+                        this.dragSourcePlanet.routeTarget = closestPlanet || { x: e.clientX, y: e.clientY };
                     }
                 } else if (dragDist > 10 && !this.dragSourcePlanet) {
                     // Drag selection (only if not dragging from a planet)
+                    // Center circle halfway between start and end points
+                    const centerX = (this.dragStartX + e.clientX) / 2;
+                    const centerY = (this.dragStartY + e.clientY) / 2;
                     // Use dragDist / 2 as radius (dragDist is diameter)
-                    this.selectPhotonsInCircle(this.dragStartX, this.dragStartY, dragDist / 2);
+                    this.selectPhotonsInCircle(centerX, centerY, dragDist / 2);
                 } else if (dragDist <= 10) {
                     // Click - check what to do
                     if (this.selectedPhotons.size > 0) {
@@ -657,21 +677,25 @@ class Game {
     }
 
     update(deltaTime) {
+        // Increment game time (already multiplied by speed in gameLoop)
+        this.gameTime += deltaTime;
+
         // Update planets
         for (const planet of this.planets) {
             planet.update(deltaTime);
         }
 
-        // Pulse planets
-        const currentTime = performance.now();
-        if (currentTime - this.lastPulseCheck > 100) {
-            this.lastPulseCheck = currentTime;
+        // Pulse planets (using game time)
+        if (this.gameTime - this.lastPulseCheck > 100) {
+            this.lastPulseCheck = this.gameTime;
             for (const planet of this.planets) {
-                const newPhotons = planet.pulse(currentTime);
+                const newPhotons = planet.pulse(this.gameTime);
                 // Set targets for routed photons
                 for (const photon of newPhotons) {
                     if (photon.routeTargetPlanet) {
-                        photon.setTarget(photon.routeTargetPlanet.x, photon.routeTargetPlanet.y, this.planets);
+                        // routeTargetPlanet can be a Planet or coordinates {x, y}
+                        const target = photon.routeTargetPlanet;
+                        photon.setTarget(target.x, target.y, this.planets);
                         delete photon.routeTargetPlanet;
                     }
                 }
@@ -691,10 +715,10 @@ class Game {
         this.photons = this.photons.filter(p => !p.dead);
         this.selectedPhotons = new Set([...this.selectedPhotons].filter(p => !p.dead));
 
-        // Log stats every second
-        if (currentTime - this.stats.lastLogTime >= 1000) {
-            this.logStats(currentTime);
-            this.stats.lastLogTime = currentTime;
+        // Log stats every second (using game time)
+        if (this.gameTime - this.stats.lastLogTime >= 1000) {
+            this.logStats(this.gameTime);
+            this.stats.lastLogTime = this.gameTime;
         }
 
         // Check for home planet transfers and auto self-routing
@@ -747,7 +771,7 @@ class Game {
         }
     }
 
-    logStats(currentTime) {
+    logStats(gameTime) {
         const counts = {
             RED: { planets: 0, photons: 0 },
             GREEN: { planets: 0, photons: 0 },
@@ -767,7 +791,7 @@ class Game {
         }
 
         this.stats.history.push({
-            time: Math.floor((currentTime - this.lastTime) / 1000),
+            time: Math.floor(gameTime / 1000), // Game time in seconds
             ...counts
         });
     }
@@ -912,7 +936,7 @@ class Game {
             this.ctx.fillRect(x, y, 1, 1);
         }
 
-        // Draw routes between planets
+        // Draw routes (to planets or coordinates)
         for (const planet of this.planets) {
             if (planet.routeTarget) {
                 this.ctx.strokeStyle = planet.color;
@@ -931,8 +955,10 @@ class Game {
                 const dy = planet.routeTarget.y - planet.y;
                 const angle = Math.atan2(dy, dx);
                 const arrowSize = 10;
-                const endX = planet.routeTarget.x - Math.cos(angle) * planet.routeTarget.radius;
-                const endY = planet.routeTarget.y - Math.sin(angle) * planet.routeTarget.radius;
+                // If routeTarget is a Planet, offset by radius; otherwise use exact coordinates
+                const targetRadius = planet.routeTarget.radius || 0;
+                const endX = planet.routeTarget.x - Math.cos(angle) * targetRadius;
+                const endY = planet.routeTarget.y - Math.sin(angle) * targetRadius;
 
                 this.ctx.fillStyle = planet.color;
                 this.ctx.globalAlpha = 0.6;
@@ -949,6 +975,23 @@ class Game {
                 this.ctx.closePath();
                 this.ctx.fill();
                 this.ctx.globalAlpha = 1;
+
+                // If routing to empty space (not a planet), draw a target marker
+                if (!planet.routeTarget.radius) {
+                    this.ctx.strokeStyle = planet.color;
+                    this.ctx.globalAlpha = 0.6;
+                    this.ctx.lineWidth = 2;
+                    this.ctx.beginPath();
+                    this.ctx.arc(planet.routeTarget.x, planet.routeTarget.y, 8, 0, Math.PI * 2);
+                    this.ctx.stroke();
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(planet.routeTarget.x - 12, planet.routeTarget.y);
+                    this.ctx.lineTo(planet.routeTarget.x + 12, planet.routeTarget.y);
+                    this.ctx.moveTo(planet.routeTarget.x, planet.routeTarget.y - 12);
+                    this.ctx.lineTo(planet.routeTarget.x, planet.routeTarget.y + 12);
+                    this.ctx.stroke();
+                    this.ctx.globalAlpha = 1;
+                }
             }
         }
 
@@ -987,14 +1030,16 @@ class Game {
                     this.ctx.stroke();
                 }
             } else {
-                // Draw selection circle (dragDist is diameter, so radius = dragDist / 2)
+                // Draw selection circle centered between start and current drag points
                 const diameter = distance(this.dragStartX, this.dragStartY, this.dragCurrentX, this.dragCurrentY);
                 const radius = diameter / 2;
+                const centerX = (this.dragStartX + this.dragCurrentX) / 2;
+                const centerY = (this.dragStartY + this.dragCurrentY) / 2;
                 this.ctx.strokeStyle = '#fff';
                 this.ctx.globalAlpha = 0.3;
                 this.ctx.lineWidth = 2;
                 this.ctx.beginPath();
-                this.ctx.arc(this.dragStartX, this.dragStartY, radius, 0, Math.PI * 2);
+                this.ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
                 this.ctx.stroke();
                 this.ctx.globalAlpha = 1;
             }
