@@ -12,12 +12,13 @@ A minimalist real-time strategy game that distills the RTS genre down to its cor
 ### Planets
 - **Sizes**: 1, 2, or 3 (determines radius and photon emission rate)
 - **Colored HP System**:
-  - Each team has **separate HP** on every planet (Red HP, Green HP, Blue HP)
-  - Planet is controlled by the team with the **highest HP ≥ 100**
+  - Each planet tracks HP separately for each team, but **only one team can have HP > 0 at a time**
+  - Planet is controlled by the team with **HP ≥ 100**
   - When controlling team's HP drops below 100, planet becomes neutral (gray)
-  - Max HP per team: 300 (achieves size 3)
-  - Multiple colored HP bars show each team's progress on contested planets
-  - Prevents "sniping" - you can't steal a planet with 1 photon if enemy has 99 HP
+  - When defender reaches 0 HP, attacker starts building their HP on that planet
+  - Max HP: 300 (achieves size 3)
+  - Colored HP bar shows which team owns the planet and their progress
+  - Prevents "sniping" - you must reduce enemy to 0 before building your HP
 - **Pulse**: Every 2 seconds, controlled planets emit 1/2/3 photons based on size
 - **Team Colors**: Red, Green, Blue, Gray (uninhabited)
 
@@ -37,12 +38,15 @@ A minimalist real-time strategy game that distills the RTS genre down to its cor
 
 1. **Orbital Mechanics**: Photons near friendly planets (within orbit radius) get pulled into orbit
 2. **Planet Interaction** (Colored HP):
-   - **Any Planet**: Photon always adds +1 HP to its own team's pool
-   - **Enemy Planet**: Also subtracts -1 HP from the controlling team
-   - **Example**: Red photon hits Green-controlled planet (Green 150 HP, Red 0 HP)
-     - Result: Green 149 HP, Red 1 HP
+   - **Neutral Planet** (all teams at 0 HP): Photon adds +1 HP to its team
+   - **Friendly Planet**: Photon adds +1 HP to your team
+   - **Enemy Planet**: Photon subtracts -1 HP from enemy team (does NOT add to attacker)
+   - **Takeover**: When defender reaches 0 HP, next attacker photon adds +1 HP to attacker's team
+   - **Examples**:
+     - Green 150 HP, Red photon hits → Green 149 HP, Red 0 HP
+     - Green 1 HP, Red photon hits → Green 0 HP, Red 1 HP (takeover begins!)
+     - Green 99 HP, Red photon hits → Green 98 HP, Red 0 HP (Green still building)
    - **Colonization**: First team to reach 100 HP controls the planet
-   - **Contested Planet**: If Green has 99 HP and Red sends 1 photon → Red gets 1 HP, planet stays neutral
 3. **Enemy Attraction**: Enemy photons within ~large planet diameter attract and neutralize each other on collision
 
 ### Strategy Tips
@@ -52,10 +56,10 @@ A minimalist real-time strategy game that distills the RTS genre down to its cor
 - Create supply lines from safe planets to frontline positions
 - Enemy photons will collide - use this to your advantage
 - Capture neutral planets early to expand your empire
-- Watch for contested planets - multiple colored HP bars indicate ongoing battles
-- Attacking reduces enemy HP AND builds your HP on that planet
-- A planet at 0 HP for the controlling team reverts to neutral
-- Coordinate attacks to reach 100 HP before enemies can defend
+- Attacking only reduces enemy HP - you must bring them to 0 before building your own
+- A sustained attack is needed to take over enemy planets (can't snipe with 1 photon)
+- Defend planets under attack before enemy reduces you to 0 HP
+- Coordinate massive attacks to overwhelm enemy defenses
 
 ## Technical Details
 
@@ -82,8 +86,8 @@ You can adjust game parameters in `game.js`:
 ✅ Click-to-move photon control
 ✅ Planet-to-planet routing for automated photon flow
 ✅ Visual route indicators with arrows
-✅ **Colored HP system** - each team has separate HP on every planet
-✅ Multi-colored HP bars showing contested planet status
+✅ **Colored HP system** - only one team can have HP on a planet at a time
+✅ Visual HP bars showing which team controls each planet
 ✅ Orbital mechanics for friendly photons
 ✅ Enemy photon attraction and neutralization
 ✅ Dynamic planet control based on HP thresholds
