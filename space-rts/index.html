@@ -29,6 +29,55 @@
             padding: 5px;
             background: rgba(0,0,0,0.5);
         }
+        #statsOverlay {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.95);
+            padding: 30px;
+            border: 2px solid #fff;
+            max-width: 90%;
+            max-height: 90%;
+            overflow: auto;
+            z-index: 1000;
+        }
+        #statsOverlay h2 {
+            color: #fff;
+            margin-top: 0;
+        }
+        #statsChart {
+            background: #222;
+            border: 1px solid #444;
+            margin: 20px 0;
+        }
+        #closeStats {
+            background: #444;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            margin-top: 10px;
+        }
+        #closeStats:hover {
+            background: #666;
+        }
+        .stats-button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.5);
+            color: #fff;
+            border: 1px solid #fff;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+        }
+        .stats-button:hover {
+            background: rgba(255,255,255,0.1);
+        }
     </style>
 </head>
 <body>
@@ -38,6 +87,12 @@
         <div class="team-info" style="color: #44ff44;">Green Planets: <span id="greenCount">0</span></div>
         <div class="team-info" style="color: #4444ff;">Blue Planets: <span id="blueCount">0</span></div>
         <div class="team-info">FPS: <span id="fps">60</span></div>
+    </div>
+    <button class="stats-button" onclick="window.game && window.game.showStats()">View Stats</button>
+    <div id="statsOverlay">
+        <h2>Game Statistics</h2>
+        <canvas id="statsChart" width="800" height="400"></canvas>
+        <button id="closeStats" onclick="document.getElementById('statsOverlay').style.display='none'">Close</button>
     </div>
     <script src="game.js"></script>
 </body>
