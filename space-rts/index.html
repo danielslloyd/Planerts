@@ -78,6 +78,24 @@
         .stats-button:hover {
             background: rgba(255,255,255,0.1);
         }
+        .speed-controls {
+            position: absolute;
+            top: 60px;
+            right: 10px;
+        }
+        .speed-btn {
+            background: rgba(0,0,0,0.5);
+            color: #fff;
+            border: 1px solid #fff;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            margin: 2px;
+            display: block;
+        }
+        .speed-btn:hover {
+            background: rgba(255,255,255,0.1);
+        }
     </style>
 </head>
 <body>
@@ -89,6 +107,11 @@
         <div class="team-info">FPS: <span id="fps">60</span></div>
     </div>
     <button class="stats-button" onclick="window.game && window.game.showStats()">View Stats</button>
+    <div class="speed-controls">
+        <button id="speed1x" class="speed-btn" onclick="window.game && window.game.setGameSpeed(1)">1x</button>
+        <button id="speed2x" class="speed-btn" onclick="window.game && window.game.setGameSpeed(2)">2x</button>
+        <button id="speed10x" class="speed-btn" onclick="window.game && window.game.setGameSpeed(10)">10x</button>
+    </div>
     <div id="statsOverlay">
         <h2>Game Statistics</h2>
         <canvas id="statsChart" width="800" height="400"></canvas>

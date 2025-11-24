@@ -46,15 +46,15 @@ function randomRange(min, max) {
 
 // Planet Class
 class Planet {
-    constructor(x, y, size, team = 'NONE', maxPotential = 3) {
+    constructor(x, y, initialHP, team = 'NONE', maxPotential = 3) {
         this.x = x;
         this.y = y;
-        this.size = size; // 1, 2, or 3 (current size)
         this.maxPotential = maxPotential; // Maximum size this planet can grow to (1, 2, or 3)
         this.lastPulse = 0;
         this.pulsePhase = 0;
         this.orbitingPhotons = [];
-        this.routeTarget = null; // Planet to send newly pulsed photons to
+        this.routeTarget = null; // Planet to send newly pulsed photons to (null for self-routing)
+        this.isHome = false; // Tracks if this is a home planet
 
         // Colored HP system - each team has separate HP
         this.hpByTeam = {
@@ -65,12 +65,22 @@ class Planet {
 
         // Initialize HP for starting team
         if (team !== 'NONE') {
-            this.hpByTeam[team] = size * 100;
+            this.hpByTeam[team] = initialHP;
         }
     }
 
     get radius() {
+        // Radius determined by current HP and potential
         return CONFIG.PLANET_BASE_RADIUS * this.size;
+    }
+
+    get size() {
+        // Size determined purely by HP
+        const hp = this.hp;
+        if (hp >= 300 && this.maxPotential >= 3) return 3;
+        if (hp >= 200 && this.maxPotential >= 2) return 2;
+        if (hp >= 100) return 1;
+        return 0;
     }
 
     get orbitRadius() {
@@ -115,21 +125,15 @@ class Planet {
         return this.maxPotential * 100;
     }
 
-    get currentSize() {
-        // Calculate current size based on controlling team's HP
-        const hp = this.hp;
-        if (hp >= 300 && this.maxPotential >= 3) return 3;
-        if (hp >= 200 && this.maxPotential >= 2) return 2;
-        if (hp >= 100) return 1;
-        return 0;
-    }
-
     update(deltaTime) {
         this.pulsePhase += deltaTime / 1000;
     }
 
     pulse(currentTime) {
-        if (this.team === 'NONE' || currentTime - this.lastPulse < CONFIG.PULSE_INTERVAL) {
+        // Home planets always produce at size 1 rate, even if HP < 100
+        const canPulse = this.isHome ? this.team !== 'NONE' : (this.team !== 'NONE' && this.hp >= 100);
+
+        if (!canPulse || currentTime - this.lastPulse < CONFIG.PULSE_INTERVAL) {
             return [];
         }
 
@@ -160,21 +164,14 @@ class Planet {
     }
 
     addHP(team, amount) {
-        const oldSize = this.currentSize;
         const oldTeam = this.team;
 
         // Add HP to the specific team's pool (capped at maxPotential * 100)
         this.hpByTeam[team] = Math.max(0, Math.min(this.maxPotential * 100, this.hpByTeam[team] + amount));
 
-        // Check if size changed based on controlling team's HP
-        const newSize = this.currentSize;
-        if (newSize !== oldSize && newSize > 0) {
-            this.size = newSize;
-        }
-
-        // If control changed, clear routes
+        // If control changed, clear routes (unless self-routed)
         const newTeam = this.team;
-        if (oldTeam !== newTeam) {
+        if (oldTeam !== newTeam && this.routeTarget !== this) {
             this.routeTarget = null;
         }
 
@@ -374,12 +371,19 @@ class Photon {
                 const isAtMaxHP = planet.hpByTeam[this.team] >= planet.maxHP;
 
                 if (currentTeamWithHP === this.team && isAtMaxHP) {
-                    // Friendly planet at max HP - enter orbit instead of absorbing
-                    if (this.state !== 'orbiting') {
-                        this.state = 'orbiting';
-                        this.orbitPlanet = planet;
-                        this.orbitAngle = Math.atan2(this.y - planet.y, this.x - planet.x);
+                    // Friendly planet at max HP - inherit its routing
+                    if (planet.routeTarget === planet) {
+                        // Self-routed: enter orbit
+                        if (this.state !== 'orbiting') {
+                            this.state = 'orbiting';
+                            this.orbitPlanet = planet;
+                            this.orbitAngle = Math.atan2(this.y - planet.y, this.x - planet.x);
+                        }
+                    } else if (planet.routeTarget) {
+                        // Routed to another planet: adopt that route
+                        this.setTarget(planet.routeTarget.x, planet.routeTarget.y, planets);
                     }
+                    // Don't die - continue with new mission
                 } else {
                     // Not at max HP - proceed with normal interaction
                     if (currentTeamWithHP === null) {
@@ -453,10 +457,23 @@ class Game {
             lastLogTime: performance.now()
         };
         this.gameActive = true;
+        this.gameSpeed = 1; // 1x, 2x, or 10x
 
         this.setupEventListeners();
         this.generatePlanets();
+        this.setGameSpeed(1); // Initialize speed button state
         this.gameLoop();
+    }
+
+    setGameSpeed(speed) {
+        this.gameSpeed = speed;
+        // Update button states
+        ['1x', '2x', '10x'].forEach(s => {
+            const btn = document.getElementById(`speed${s}`);
+            if (btn) {
+                btn.style.background = s === `${speed}x` ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.5)';
+            }
+        });
     }
 
     resizeCanvas() {
@@ -499,13 +516,16 @@ class Game {
                 const dragDist = distance(this.dragStartX, this.dragStartY, e.clientX, e.clientY);
                 const targetPlanet = this.getPlanetAtPosition(e.clientX, e.clientY);
 
-                // Check for planet-to-planet routing
-                if (this.dragSourcePlanet && targetPlanet && this.dragSourcePlanet !== targetPlanet && dragDist > 10) {
-                    // Set up route from source planet to target planet
-                    this.dragSourcePlanet.routeTarget = targetPlanet;
+                // Check for planet-to-planet routing (or self-routing)
+                if (this.dragSourcePlanet && dragDist > 10) {
+                    if (targetPlanet) {
+                        // Set up route to target planet (including self)
+                        this.dragSourcePlanet.routeTarget = targetPlanet;
+                    }
                 } else if (dragDist > 10 && !this.dragSourcePlanet) {
                     // Drag selection (only if not dragging from a planet)
-                    this.selectPhotonsInCircle(this.dragStartX, this.dragStartY, dragDist);
+                    // Use dragDist / 2 as radius (dragDist is diameter)
+                    this.selectPhotonsInCircle(this.dragStartX, this.dragStartY, dragDist / 2);
                 } else if (dragDist <= 10) {
                     // Click - check what to do
                     if (this.selectedPhotons.size > 0) {
@@ -514,8 +534,8 @@ class Game {
                             photon.setTarget(e.clientX, e.clientY, this.planets);
                         }
                     } else if (this.dragSourcePlanet) {
-                        // Clear route if clicking on a planet with no selected photons
-                        this.dragSourcePlanet.routeTarget = null;
+                        // Toggle self-routing if clicking on same planet
+                        this.dragSourcePlanet.routeTarget = this.dragSourcePlanet.routeTarget === this.dragSourcePlanet ? null : this.dragSourcePlanet;
                     }
                 }
             }
@@ -526,7 +546,6 @@ class Game {
 
     generatePlanets() {
         const teams = ['RED', 'GREEN', 'BLUE'];
-        const homePlanets = [];
 
         // Generate home planets for each team (all start at potential 3, HP 100)
         for (let i = 0; i < teams.length; i++) {
@@ -534,11 +553,12 @@ class Game {
             const dist = Math.min(this.canvas.width, this.canvas.height) * 0.3;
             const x = this.canvas.width / 2 + Math.cos(angle) * dist;
             const y = this.canvas.height / 2 + Math.sin(angle) * dist;
-            const size = 1; // Start at size 1 (will have 100 HP)
+            const initialHP = 100;
             const maxPotential = 3; // All home planets have potential 3
 
-            const planet = new Planet(x, y, size, teams[i], maxPotential);
-            homePlanets.push(planet);
+            const planet = new Planet(x, y, initialHP, teams[i], maxPotential);
+            planet.isHome = true;
+            planet.routeTarget = planet; // Default to self-routing
             this.planets.push(planet);
         }
 
@@ -559,9 +579,11 @@ class Game {
             }
 
             if (valid) {
-                const size = Math.floor(randomRange(1, 4));
+                const initialHP = 0;
                 const maxPotential = Math.floor(randomRange(1, 4));
-                this.planets.push(new Planet(x, y, size, 'NONE', maxPotential));
+                const planet = new Planet(x, y, initialHP, 'NONE', maxPotential);
+                planet.routeTarget = planet; // Default to self-routing
+                this.planets.push(planet);
             }
         }
     }
@@ -675,8 +697,54 @@ class Game {
             this.stats.lastLogTime = currentTime;
         }
 
+        // Check for home planet transfers and auto self-routing
+        this.manageHomePlanets();
+
+        // Check for game end
+        this.checkGameEnd();
+
         // Update UI
         this.updateUI();
+    }
+
+    manageHomePlanets() {
+        const teams = ['RED', 'GREEN', 'BLUE'];
+
+        for (const team of teams) {
+            const teamPlanets = this.planets.filter(p => p.team === team);
+            const homePlanet = teamPlanets.find(p => p.isHome);
+
+            // If home planet lost, transfer home status to largest potential planet
+            if (!homePlanet && teamPlanets.length > 0) {
+                const newHome = teamPlanets.reduce((max, p) => p.maxPotential > max.maxPotential ? p : max, teamPlanets[0]);
+                newHome.isHome = true;
+            }
+
+            // If down to one planet with HP < 100, set to self-routing
+            if (teamPlanets.length === 1) {
+                const lastPlanet = teamPlanets[0];
+                if (lastPlanet.hp < 100 && lastPlanet.routeTarget !== lastPlanet) {
+                    lastPlanet.routeTarget = lastPlanet;
+                }
+            }
+        }
+    }
+
+    checkGameEnd() {
+        if (!this.gameActive) return;
+
+        const teams = ['RED', 'GREEN', 'BLUE'];
+        const activePlayers = teams.filter(team => {
+            return this.planets.some(p => p.team === team);
+        });
+
+        if (activePlayers.length === 1) {
+            this.gameActive = false;
+            setTimeout(() => {
+                alert(`${activePlayers[0]} wins!`);
+                this.showStats();
+            }, 500);
+        }
     }
 
     logStats(currentTime) {
@@ -919,8 +987,9 @@ class Game {
                     this.ctx.stroke();
                 }
             } else {
-                // Draw selection circle
-                const radius = distance(this.dragStartX, this.dragStartY, this.dragCurrentX, this.dragCurrentY);
+                // Draw selection circle (dragDist is diameter, so radius = dragDist / 2)
+                const diameter = distance(this.dragStartX, this.dragStartY, this.dragCurrentX, this.dragCurrentY);
+                const radius = diameter / 2;
                 this.ctx.strokeStyle = '#fff';
                 this.ctx.globalAlpha = 0.3;
                 this.ctx.lineWidth = 2;
@@ -934,11 +1003,11 @@ class Game {
 
     gameLoop() {
         const currentTime = performance.now();
-        const deltaTime = currentTime - this.lastTime;
+        const deltaTime = (currentTime - this.lastTime) * this.gameSpeed; // Apply speed multiplier
         this.lastTime = currentTime;
 
         // Update FPS
-        const fps = Math.round(1000 / deltaTime);
+        const fps = Math.round(1000 / (deltaTime / this.gameSpeed));
         document.getElementById('fps').textContent = fps;
 
         this.update(deltaTime);
