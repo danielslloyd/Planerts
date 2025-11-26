@@ -52,6 +52,8 @@ class Planet {
         this.maxPotential = maxPotential; // Maximum size this planet can grow to (1, 2, or 3)
         this.lastPulse = 0;
         this.pulsePhase = 0;
+        this.rotation = Math.random() * Math.PI * 2; // Random starting rotation
+        this.rotationSpeed = 0.2 + Math.random() * 0.3; // Random rotation speed
         this.orbitingPhotons = [];
         this.routeTarget = null; // Planet to send newly pulsed photons to (null for self-routing)
         this.isHome = false; // Tracks if this is a home planet
@@ -129,6 +131,7 @@ class Planet {
 
     update(deltaTime) {
         this.pulsePhase += deltaTime / 1000;
+        this.rotation += this.rotationSpeed * (deltaTime / 1000);
     }
 
     pulse(currentTime) {
@@ -197,17 +200,89 @@ class Planet {
             ctx.globalAlpha = 1;
         }
 
-        // Main planet
-        ctx.fillStyle = this.color;
+        // Determine base color - gray/beige for neutral, team color otherwise
+        let baseColor = this.color;
+        if (this.team === 'NONE') {
+            baseColor = '#a89968'; // Beige for uncontrolled
+        }
+
+        // Parse the color to RGB for manipulation
+        const parseColor = (hex) => {
+            if (hex === 'gray') hex = '#888888';
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            return { r, g, b };
+        };
+
+        const rgb = parseColor(baseColor);
+
+        // Draw cloudy swirling planet surface
+        ctx.save();
+
+        // Create clipping region for the planet
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.clip();
+
+        // Draw base planet color
+        ctx.fillStyle = baseColor;
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
         ctx.fill();
 
-        // Pulse effect
-        const pulseScale = 1 + Math.sin(this.pulsePhase * 3) * 0.1;
-        ctx.strokeStyle = this.color;
-        ctx.globalAlpha = 0.3;
-        ctx.lineWidth = 2;
+        // Draw swirling cloud layers
+        const cloudCount = 8;
+        for (let i = 0; i < cloudCount; i++) {
+            const angle = (i / cloudCount) * Math.PI * 2 + this.rotation;
+            const distance = (this.radius * 0.4) * Math.sin(i * 2.1 + this.rotation * 0.5);
+            const cloudX = this.x + Math.cos(angle) * distance;
+            const cloudY = this.y + Math.sin(angle) * distance;
+            const cloudSize = this.radius * (0.4 + Math.sin(i * 1.7 + this.rotation) * 0.2);
+
+            // Create lighter/darker variations
+            const brightness = 0.7 + Math.sin(i * 1.3 + this.rotation * 0.3) * 0.3;
+            const r = Math.min(255, Math.floor(rgb.r * brightness));
+            const g = Math.min(255, Math.floor(rgb.g * brightness));
+            const b = Math.min(255, Math.floor(rgb.b * brightness));
+
+            const gradient = ctx.createRadialGradient(cloudX, cloudY, 0, cloudX, cloudY, cloudSize);
+            gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.4)`);
+            gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.2)`);
+            gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(cloudX, cloudY, cloudSize, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Add swirl patterns
+        const swirlCount = 5;
+        for (let i = 0; i < swirlCount; i++) {
+            const angle = (i / swirlCount) * Math.PI * 2 - this.rotation * 1.5;
+            const swirlRadius = this.radius * 0.6;
+            const swirlX = this.x + Math.cos(angle) * swirlRadius;
+            const swirlY = this.y + Math.sin(angle) * swirlRadius;
+
+            const brightness = 0.5 + Math.sin(i * 2.1 - this.rotation) * 0.3;
+            const r = Math.min(255, Math.floor(rgb.r * brightness));
+            const g = Math.min(255, Math.floor(rgb.g * brightness));
+            const b = Math.min(255, Math.floor(rgb.b * brightness));
+
+            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.15)`;
+            ctx.beginPath();
+            ctx.arc(swirlX, swirlY, this.radius * 0.3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.restore();
+
+        // Pulse effect - LARGER when birthing photons
+        const pulseScale = 1 + Math.sin(this.pulsePhase * 3) * 0.25; // Increased from 0.1 to 0.25
+        ctx.strokeStyle = baseColor;
+        ctx.globalAlpha = 0.5; // Increased from 0.3
+        ctx.lineWidth = 3; // Increased from 2
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius * pulseScale, 0, Math.PI * 2);
         ctx.stroke();
